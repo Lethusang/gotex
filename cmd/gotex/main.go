@@ -1,80 +1,112 @@
+// Package main provides a simple text editor demonstration using the buffer package for now
 package main
 
 import (
 	"fmt"
+	"log"
+
 	"gotex/internal/buffer"
 )
 
 func main() {
-    buf := buffer.NewBuffer()
+	// Create a new buffer
+	buf := buffer.New()
 
-    fmt.Print("\033[?1049h") // Use alternate screen buffer
-    defer fmt.Print("\033[?1049l") // Restore main screen buffer
+	// Example of basic text insertion
+	insertText(buf, "Hello, World!")
 
-    for {
-        // Clear screen
-        fmt.Print("\033[2J")
-        fmt.Print("\033[H")
+	// Example of selection and manipulation
+	demonstrateSelection(buf)
 
-        // Display buffer content
-        content := buf.GetLines()
-        for i, line := range content {
-            fmt.Printf("%3d: %s\n", i+1, line)
-        }
+	// Print final buffer contents
+	printBufferContents(buf)
+}
 
-        // Display cursor position
-        x, y := buf.GetCursor()
-        fmt.Printf("\nCursor position: (%d, %d)\n", x, y)
+// insertText inserts a string into the buffer character by character.
+func insertText(buf *buffer.Buffer, text string) {
+	for _, r := range text {
+		if err := buf.InsertRune(r); err != nil {
+			log.Printf("Error inserting rune: %v", err)
+		}
+	}
+}
 
-        if buf.HasSelection() {
-            startX, startY, endX, endY, _ := buf.GetSelectionCoordinates()
-            fmt.Printf("Selection: (%d,%d) -> (%d,%d)\n", startX, startY, endX, endY)
-            fmt.Printf("Selected text: %s\n", buf.GetSelection())
-        }
+// demonstrateSelection shows selection functionality.
+func demonstrateSelection(buf *buffer.Buffer) {
+	// Move cursor to beginning
+	if err := buf.MoveCursor(-buf.GetCursor().X, 0); err != nil {
+		log.Printf("Error moving cursor to start: %v", err)
+		return
+	}
 
-        // Display menu
-        fmt.Println("\nCommands:")
-        fmt.Println("1: Insert text")
-        fmt.Println("2: Move cursor")
-        fmt.Println("3: Start selection")
-        fmt.Println("4: End selection")
-        fmt.Println("5: Delete selection")
-        fmt.Println("q: Quit")
+	// Start selection
+	buf.StartSelection()
 
-        // Get command
-        var cmd string
-        fmt.Print("\nEnter command: ")
-        fmt.Scan(&cmd)
+	// Select "Hello"
+	if err := buf.MoveCursor(5, 0); err != nil {
+		log.Printf("Error moving cursor during selection: %v", err)
+		return
+	}
 
-        switch cmd {
-        case "1":
-            fmt.Print("Enter text: ")
-            var text string
-            fmt.Scan(&text)
-            for _, r := range text {
-                buf.InsertRune(r)
-            }
+	// Get selected text
+	selected, err := buf.GetSelection()
+	if err != nil {
+		log.Printf("Error getting selection: %v", err)
+		return
+	}
 
-        case "2":
-            fmt.Print("Enter dx dy: ")
-            var dx, dy int
-            fmt.Scan(&dx, &dy)
-            buf.MoveCursor(dx, dy)
+	fmt.Printf("Selected text: %q\n", selected)
 
-        case "3":
-            buf.StartSelection()
-            fmt.Println("Selection started")
+	// Replace selection with new text
+	if err := buf.DeleteSelection(); err != nil {
+		log.Printf("Error deleting selection: %v", err)
+		return
+	}
 
-        case "4":
-            buf.EndSelection()
-            fmt.Println("Selection ended")
+	insertText(buf, "Greetings")
+}
 
-        case "5":
-            buf.DeleteSelection()
-            fmt.Println("Selection deleted")
+// printBufferContents prints the current state of the buffer.
+func printBufferContents(buf *buffer.Buffer) {
+	fmt.Println("\nBuffer contents:")
+	for i, line := range buf.GetLines() {
+		fmt.Printf("Line %d: %q\n", i+1, line)
+	}
 
-        case "q":
-            return
-        }
-    }
+	cursor := buf.GetCursor()
+	fmt.Printf("\nCursor position: (%d, %d)\n", cursor.X, cursor.Y)
+}
+
+// Example usage of other buffer features
+func additionalExamples(buf *buffer.Buffer) error {
+	// Insert a new line
+	if err := buf.NewLine(); err != nil {
+		return fmt.Errorf("error inserting new line: %w", err)
+	}
+
+	// Insert some text on the new line
+	insertText(buf, "This is a new line")
+
+	// Move cursor around
+	movements := [][2]int{
+		{-1, 0}, // left
+		{1, 0},  // right
+		{0, -1}, // up
+		{0, 1},  // down
+	}
+
+	for _, move := range movements {
+		if err := buf.MoveCursor(move[0], move[1]); err != nil {
+			log.Printf("Warning: couldn't move cursor (%d, %d): %v", move[0], move[1], err)
+		}
+	}
+
+	return nil
+}
+
+// handleError is a helper function for error handling
+func handleError(err error, message string) {
+	if err != nil {
+		log.Printf("%s: %v", message, err)
+	}
 }

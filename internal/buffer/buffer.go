@@ -1,262 +1,252 @@
+// Package buffer provides text buffer manipulation capabilities with support
+// for cursor positioning, text selection, and basic editing operations.
 package buffer
 
 import (
+	"errors"
 	"strings"
 )
 
-// Selection represents a selected region of text
+// Position represents a location in the buffer defined by X (column) and Y (row).
+type Position struct {
+    X, Y int
+}
+
+// Selection represents a selected region of text defined by start and end positions.
 type Selection struct {
-	startX, startY int  // Starting position
-	endX, endY     int  // Ending position
-	active         bool // Whether selection is currently active
+    start, end Position
 }
 
-// Buffer represents the text content and cursor position
+// Buffer represents an editable text buffer with cursor positioning and selection support.
+// It maintains the text content as a slice of lines and provides methods for text manipulation.
 type Buffer struct {
-	lines     []string
-	cursorX   int
-	cursorY   int
-	filename  string
-	selection Selection
+    lines     []string   // Text content split by lines
+    cursor    Position   // Current cursor position
+    selection *Selection // Current selection, nil if none
+    filename  string     // Associated filename, empty if new buffer
 }
 
-func NewBuffer() *Buffer {
-	return &Buffer{
-		lines:    []string{""},
-		cursorX:  0,
-		cursorY:  0,
-		filename: "",
-		selection: Selection{
-			active: false,
-		},
-	}
+// Common errors that can occur during buffer operations.
+var (
+    ErrInvalidPosition  = errors.New("invalid cursor position")
+    ErrInvalidSelection = errors.New("invalid selection bounds")
+    ErrNoSelection     = errors.New("no active selection")
+)
+
+// New creates a new empty buffer.
+// It initializes the buffer with a single empty line and cursor at position (0,0).
+func New() *Buffer {
+    return &Buffer{
+        lines:  []string{""},
+        cursor: Position{},
+    }
 }
 
-// GetLines returns all lines in the buffer
+// GetLines returns all lines in the buffer.
 func (b *Buffer) GetLines() []string {
-	return b.lines
+    return b.lines
 }
 
-// Other required methods
-func (b *Buffer) GetCursor() (int, int) {
-	return b.cursorX, b.cursorY
+// GetCursor returns the current cursor position.
+func (b *Buffer) GetCursor() Position {
+    return b.cursor
 }
 
-// StartSelection begins a new text selection at the current cursor position
+// StartSelection begins a new text selection at the current cursor position.
 func (b *Buffer) StartSelection() {
-	b.selection.startX = b.cursorX
-	b.selection.startY = b.cursorY
-	b.selection.endX = b.cursorX
-	b.selection.endY = b.cursorY
-	b.selection.active = true
+    b.selection = &Selection{
+        start: b.cursor,
+        end:   b.cursor,
+    }
 }
 
-// EndSelection ends the current selection
+// EndSelection clears the current selection.
 func (b *Buffer) EndSelection() {
-	b.selection.active = false
+    b.selection = nil
 }
 
-// UpdateSelection updates the selection end point to the current cursor position
-func (b *Buffer) UpdateSelection() {
-	if b.selection.active {
-		b.selection.endX = b.cursorX
-		b.selection.endY = b.cursorY
-	}
-}
-
-// HasSelection returns whether there is an active selection
+// HasSelection returns whether there is an active selection.
 func (b *Buffer) HasSelection() bool {
-	return b.selection.active
+    return b.selection != nil
 }
 
-// GetSelection returns the selected text
-func (b *Buffer) GetSelection() string {
-	if !b.selection.active {
-		return ""
-	}
-
-	// Normalize selection coordinates
-	startX, startY, endX, endY := b.getNormalizedSelection()
-
-	// Build selected text
-	var result strings.Builder
-
-	// Single line selection
-	if startY == endY {
-		line := b.lines[startY]
-		result.WriteString(line[startX:endX])
-		return result.String()
-	}
-
-	// Multi-line selection
-	// First line
-	result.WriteString(b.lines[startY][startX:])
-	result.WriteString("\n")
-
-	// Middle lines
-	for y := startY + 1; y < endY; y++ {
-		result.WriteString(b.lines[y])
-		result.WriteString("\n")
-	}
-
-	// Last line
-	result.WriteString(b.lines[endY][:endX])
-
-	return result.String()
+// UpdateSelection updates the selection end point to the current cursor position.
+func (b *Buffer) UpdateSelection() {
+    if b.HasSelection() {
+        b.selection.end = b.cursor
+    }
 }
 
-// NewLine inserts a new line at the current cursor position
-func (b *Buffer) NewLine() {
-	currentLine := b.lines[b.cursorY]
-	remainingText := currentLine[b.cursorX:]
-	b.lines[b.cursorY] = currentLine[:b.cursorX]
+// GetSelection returns the selected text.
+// Returns an empty string and error if no selection exists.
+func (b *Buffer) GetSelection() (string, error) {
+    if !b.HasSelection() {
+        return "", ErrNoSelection
+    }
 
-	// Insert new line
-	b.lines = append(b.lines[:b.cursorY+1], append([]string{remainingText}, b.lines[b.cursorY+1:]...)...)
-
-	b.cursorY++
-	b.cursorX = 0
+    start, end := b.getNormalizedSelectionBounds()
+    return b.getTextBetween(start, end), nil
 }
 
-// InsertRune inserts a single character at the current cursor position
-func (b *Buffer) InsertRune(r rune) {
-	currentLine := b.lines[b.cursorY]
-	newLine := currentLine[:b.cursorX] + string(r) + currentLine[b.cursorX:]
-	b.lines[b.cursorY] = newLine
-	b.cursorX++
+// NewLine inserts a new line at the current cursor position.
+func (b *Buffer) NewLine() error {
+    if err := b.validateCursor(); err != nil {
+        return err
+    }
+
+    currentLine := b.lines[b.cursor.Y]
+    remainingText := currentLine[b.cursor.X:]
+    b.lines[b.cursor.Y] = currentLine[:b.cursor.X]
+
+    // Insert new line
+    b.lines = append(
+        b.lines[:b.cursor.Y+1],
+        append([]string{remainingText}, b.lines[b.cursor.Y+1:]...)...,
+    )
+
+    b.cursor.Y++
+    b.cursor.X = 0
+    return nil
 }
 
-// DeleteSelection removes the selected text
-func (b *Buffer) DeleteSelection() {
-	if !b.selection.active {
-		return
-	}
+// InsertRune inserts a single character at the current cursor position.
+func (b *Buffer) InsertRune(r rune) error {
+    if err := b.validateCursor(); err != nil {
+        return err
+    }
 
-	startX, startY, endX, endY := b.getNormalizedSelection()
+    currentLine := b.lines[b.cursor.Y]
+    if b.cursor.X > len(currentLine) {
+        return ErrInvalidPosition
+    }
 
-	// Single line deletion
-	if startY == endY {
-		line := b.lines[startY]
-		b.lines[startY] = line[:startX] + line[endX:]
-		b.cursorX = startX
-		b.cursorY = startY
-		b.EndSelection()
-		return
-	}
-
-	// Multi-line deletion
-	newLine := b.lines[startY][:startX] + b.lines[endY][endX:]
-	b.lines = append(b.lines[:startY], append([]string{newLine}, b.lines[endY+1:]...)...)
-
-	b.cursorX = startX
-	b.cursorY = startY
-	b.EndSelection()
+    newLine := currentLine[:b.cursor.X] + string(r) + currentLine[b.cursor.X:]
+    b.lines[b.cursor.Y] = newLine
+    b.cursor.X++
+    return nil
 }
 
-// ReplaceSelection replaces the selected text with new text
-func (b *Buffer) ReplaceSelection(newText string) {
-	if !b.selection.active {
-		return
-	}
+// DeleteSelection removes the selected text.
+// Returns an error if no selection exists.
+func (b *Buffer) DeleteSelection() error {
+    if !b.HasSelection() {
+        return ErrNoSelection
+    }
 
-	startX, startY, _, _ := b.getNormalizedSelection() // Use blank identifier _ for unused values
+    start, end := b.getNormalizedSelectionBounds()
 
-	// Delete existing selection
-	b.DeleteSelection()
+    // Single line deletion
+    if start.Y == end.Y {
+        line := b.lines[start.Y]
+        b.lines[start.Y] = line[:start.X] + line[end.X:]
+        b.cursor = start
+        b.EndSelection()
+        return nil
+    }
 
-	// Insert new text
-	b.cursorX = startX
-	b.cursorY = startY
+    // Multi-line deletion
+    newLine := b.lines[start.Y][:start.X] + b.lines[end.Y][end.X:]
+    b.lines = append(b.lines[:start.Y], append([]string{newLine}, b.lines[end.Y+1:]...)...)
 
-	lines := strings.Split(newText, "\n")
-	for i, line := range lines {
-		if i > 0 {
-			b.NewLine()
-		}
-		for _, r := range line {
-			b.InsertRune(r)
-		}
-	}
+    b.cursor = start
+    b.EndSelection()
+    return nil
 }
 
-// IsPositionInSelection checks if a given position is within the selection
-func (b *Buffer) IsPositionInSelection(x, y int) bool {
-	if !b.selection.active {
-		return false
-	}
+// MoveCursor moves the cursor by the specified delta.
+// Returns an error if the resulting position would be invalid.
+func (b *Buffer) MoveCursor(deltaX, deltaY int) error {
+    newPos := Position{
+        X: b.cursor.X + deltaX,
+        Y: b.cursor.Y + deltaY,
+    }
 
-	startX, startY, endX, endY := b.getNormalizedSelection()
+    if err := b.validatePosition(newPos); err != nil {
+        return err
+    }
 
-	// If y is outside the selection range
-	if y < startY || y > endY {
-		return false
-	}
-
-	// If we're on the start line, check if x is after startX
-	if y == startY && x < startX {
-		return false
-	}
-
-	// If we're on the end line, check if x is before endX
-	if y == endY && x >= endX {
-		return false
-	}
-
-	// Position is within selection
-	return true
+    b.cursor = newPos
+    b.UpdateSelection()
+    return nil
 }
 
-// getNormalizedSelection returns selection coordinates in correct order
-func (b *Buffer) getNormalizedSelection() (startX, startY, endX, endY int) {
-	startX = b.selection.startX
-	startY = b.selection.startY
-	endX = b.selection.endX
-	endY = b.selection.endY
+// IsPositionInSelection checks if a given position is within the selection.
+func (b *Buffer) IsPositionInSelection(pos Position) bool {
+    if !b.HasSelection() {
+        return false
+    }
 
-	// Swap if selection is backwards
-	if startY > endY || (startY == endY && startX > endX) {
-		startX, endX = endX, startX
-		startY, endY = endY, startY
-	}
-
-	return
+    start, end := b.getNormalizedSelectionBounds()
+    return isPositionBetween(pos, start, end)
 }
 
-// MoveCursor with selection support
-func (b *Buffer) MoveCursor(deltaX, deltaY int) {
-	newY := b.cursorY + deltaY
+// Private helper methods
 
-	if newY < 0 {
-		newY = 0
-	} else if newY >= len(b.lines) {
-		newY = len(b.lines) - 1
-	}
-
-	newX := b.cursorX + deltaX
-	if newX < 0 {
-		if newY > 0 {
-			newY--
-			newX = len(b.lines[newY])
-		} else {
-			newX = 0
-		}
-	} else if newX > len(b.lines[newY]) {
-		if newY < len(b.lines)-1 {
-			newY++
-			newX = 0
-		} else {
-			newX = len(b.lines[newY])
-		}
-	}
-
-	b.cursorX = newX
-	b.cursorY = newY
-
-	// Update selection if active
-	b.UpdateSelection()
+// validateCursor checks if the current cursor position is valid.
+func (b *Buffer) validateCursor() error {
+    return b.validatePosition(b.cursor)
 }
 
-// GetSelectionCoordinates returns the current selection coordinates
-func (b *Buffer) GetSelectionCoordinates() (startX, startY, endX, endY int, active bool) {
-	return b.selection.startX, b.selection.startY, b.selection.endX, b.selection.endY, b.selection.active
+// validatePosition checks if the given position is valid within the buffer.
+func (b *Buffer) validatePosition(pos Position) error {
+    if pos.Y < 0 || pos.Y >= len(b.lines) {
+        return ErrInvalidPosition
+    }
+    if pos.X < 0 || pos.X > len(b.lines[pos.Y]) {
+        return ErrInvalidPosition
+    }
+    return nil
+}
+
+// getNormalizedSelectionBounds returns selection bounds in correct order.
+func (b *Buffer) getNormalizedSelectionBounds() (start, end Position) {
+    start = b.selection.start
+    end = b.selection.end
+
+    // Swap if selection is backwards
+    if start.Y > end.Y || (start.Y == end.Y && start.X > end.X) {
+        start, end = end, start
+    }
+
+    return start, end
+}
+
+// getTextBetween returns the text between two positions.
+func (b *Buffer) getTextBetween(start, end Position) string {
+    var result strings.Builder
+
+    // Single line selection
+    if start.Y == end.Y {
+        result.WriteString(b.lines[start.Y][start.X:end.X])
+        return result.String()
+    }
+
+    // Multi-line selection
+    result.WriteString(b.lines[start.Y][start.X:])
+    result.WriteString("\n")
+
+    // Middle lines
+    for y := start.Y + 1; y < end.Y; y++ {
+        result.WriteString(b.lines[y])
+        result.WriteString("\n")
+    }
+
+    // Last line
+    result.WriteString(b.lines[end.Y][:end.X])
+
+    return result.String()
+}
+
+// isPositionBetween checks if a position is between start and end positions.
+func isPositionBetween(pos, start, end Position) bool {
+    if pos.Y < start.Y || pos.Y > end.Y {
+        return false
+    }
+    if pos.Y == start.Y && pos.X < start.X {
+        return false
+    }
+    if pos.Y == end.Y && pos.X >= end.X {
+        return false
+    }
+    return true
 }
