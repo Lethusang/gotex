@@ -10,26 +10,37 @@ import (
 // EditorTheme implements a custom theme for our editor
 type EditorTheme struct {
 	defaultTheme fyne.Theme
+	isDark       bool
 }
 
 // NewEditorTheme creates a new instance of our custom theme
-func NewEditorTheme() fyne.Theme {
+func NewEditorTheme() *EditorTheme { // Changed return type to *EditorTheme
 	return &EditorTheme{
 		defaultTheme: theme.DefaultTheme(),
+		isDark:       false,
 	}
 }
 
+// Add ThemeVariant method to implement the Theme interface
+func (t *EditorTheme) ThemeVariant() fyne.ThemeVariant {
+	if t.isDark {
+		return theme.VariantDark
+	}
+	return theme.VariantLight
+}
+
 // Color overrides specific colors from the default theme
-func (t *EditorTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
+func (t *EditorTheme) Color(name fyne.ThemeColorName, _ fyne.ThemeVariant) color.Color {
+	// Use the theme's own dark/light state instead of the variant parameter
 	switch name {
 	case theme.ColorNameBackground:
-		if variant == theme.VariantDark {
+		if t.isDark {
 			return colorBackgroundDark
 		}
 		return colorBackground
 
 	case theme.ColorNameForeground:
-		if variant == theme.VariantDark {
+		if t.isDark {
 			return colorForegroundDark
 		}
 		return colorForeground
@@ -44,6 +55,11 @@ func (t *EditorTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant)
 		return colorPrimary
 	}
 
+	// Use the theme's state for the default theme colors
+	variant := theme.VariantLight
+	if t.isDark {
+		variant = theme.VariantDark
+	}
 	return t.defaultTheme.Color(name, variant)
 }
 
@@ -88,9 +104,22 @@ var (
 )
 
 func (e *Editor) toggleTheme() {
-	if e.app.Settings().ThemeVariant() == theme.VariantDark {
-		e.app.Settings().SetTheme(theme.LightTheme())
+	currentTheme, ok := e.app.Settings().Theme().(*EditorTheme)
+	if !ok {
+		// If not using our theme, create new one
+		currentTheme = NewEditorTheme()
+	}
+
+	// Toggle the theme
+	currentTheme.isDark = !currentTheme.isDark
+
+	// Apply the theme
+	e.app.Settings().SetTheme(currentTheme)
+
+	// Update status
+	if currentTheme.isDark {
+		e.updateStatus("Switched to Dark Theme")
 	} else {
-		e.app.Settings().SetTheme(theme.DarkTheme())
+		e.updateStatus("Switched to Light Theme")
 	}
 }

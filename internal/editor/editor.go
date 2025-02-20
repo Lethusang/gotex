@@ -98,14 +98,14 @@ func (e *Editor) setupShortcuts() {
 	// Add common keyboard shortcuts
 	e.mainWindow.Canvas().AddShortcut(&desktop.CustomShortcut{
 		KeyName:  fyne.KeyS,
-		Modifier: desktop.ControlModifier,
+		Modifier: fyne.KeyModifierControl, // Updated modifier
 	}, func(shortcut fyne.Shortcut) {
 		e.handleSave()
 	})
 
 	e.mainWindow.Canvas().AddShortcut(&desktop.CustomShortcut{
 		KeyName:  fyne.KeyO,
-		Modifier: desktop.ControlModifier,
+		Modifier: fyne.KeyModifierControl, // Updated modifier
 	}, func(shortcut fyne.Shortcut) {
 		e.handleOpen()
 	})
